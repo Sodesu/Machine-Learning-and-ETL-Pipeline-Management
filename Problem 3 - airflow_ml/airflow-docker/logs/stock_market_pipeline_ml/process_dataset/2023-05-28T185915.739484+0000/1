@@ -1,0 +1,23 @@
+[2023-05-29 19:02:28,841] {taskinstance.py:896} INFO - Dependencies all met for <TaskInstance: stock_market_pipeline_ml.process_dataset 2023-05-28T18:59:15.739484+00:00 [queued]>
+[2023-05-29 19:02:36,855] {taskinstance.py:896} INFO - Dependencies all met for <TaskInstance: stock_market_pipeline_ml.process_dataset 2023-05-28T18:59:15.739484+00:00 [queued]>
+[2023-05-29 19:02:36,855] {taskinstance.py:1087} INFO - 
+--------------------------------------------------------------------------------
+[2023-05-29 19:02:36,855] {taskinstance.py:1088} INFO - Starting attempt 1 of 4
+[2023-05-29 19:02:36,856] {taskinstance.py:1089} INFO - 
+--------------------------------------------------------------------------------
+[2023-05-29 19:02:38,553] {taskinstance.py:1107} INFO - Executing <Task(PythonOperator): process_dataset> on 2023-05-28T18:59:15.739484+00:00
+[2023-05-29 19:02:38,561] {standard_task_runner.py:52} INFO - Started process 6180 to run task
+[2023-05-29 19:02:38,564] {standard_task_runner.py:76} INFO - Running: ['***', 'tasks', 'run', 'stock_market_pipeline_ml', 'process_dataset', '2023-05-28T18:59:15.739484+00:00', '--job-id', '10', '--pool', 'default_pool', '--raw', '--subdir', 'DAGS_FOLDER/stock_market_pipeline_ml.py', '--cfg-path', '/tmp/tmp0qjbqw1c', '--error-file', '/tmp/tmpqlueiey8']
+[2023-05-29 19:02:38,567] {standard_task_runner.py:77} INFO - Job 10: Subtask process_dataset
+[2023-05-29 19:02:38,619] {logging_mixin.py:104} INFO - Running <TaskInstance: stock_market_pipeline_ml.process_dataset 2023-05-28T18:59:15.739484+00:00 [running]> on host 034390c2fbf7
+[2023-05-29 19:02:38,742] {taskinstance.py:1302} INFO - Exporting the following env vars:
+AIRFLOW_CTX_DAG_OWNER=***
+AIRFLOW_CTX_DAG_ID=stock_market_pipeline_ml
+AIRFLOW_CTX_TASK_ID=process_dataset
+AIRFLOW_CTX_EXECUTION_DATE=2023-05-28T18:59:15.739484+00:00
+AIRFLOW_CTX_DAG_RUN_ID=scheduled__2023-05-28T18:59:15.739484+00:00
+[2023-05-29 19:02:38,779] {logging_mixin.py:104} INFO - File /tmp/symbols_valid_meta.csv does not contain a 'Date' column. Skipping...
+[2023-05-29 19:02:38,823] {python.py:151} INFO - Done. Returned value was: None
+[2023-05-29 19:02:38,904] {taskinstance.py:1211} INFO - Marking task as SUCCESS. dag_id=stock_market_pipeline_ml, task_id=process_dataset, execution_date=20230528T185915, start_date=20230529T190228, end_date=20230529T190238
+[2023-05-29 19:02:39,007] {taskinstance.py:1265} INFO - 1 downstream tasks scheduled from follow-on schedule check
+[2023-05-29 19:02:39,056] {local_task_job.py:149} INFO - Task exited with return code 0
