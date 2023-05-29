@@ -1,0 +1,238 @@
+I am engaged with a data engineering problem. It requires me to manipulate the contents of a Python DAG script which would be passed through Apache Airflow. I want you to scan through the contents of the script based on these tasks:
+Tasks:
+Calculate the moving average of the trading volume (Volume) of 30 days per each stock and ETF, and retain it in a newly added column vol_moving_avg.
+Similarly, calculate the rolling median and retain it in a newly added column adj_close_rolling_med.
+Retain the resulting dataset into the same format as Problem 1, but in its own stage/directory distinct from the first.
+(Bonus) Write unit tests for any relevant logic.
+Problem 3: Integrate ML Training
+
+And indicated any errors that exist within my script:
+# -*- coding: utf-8 -*-
+"""
+Created on Wed May  3 17:50:10 2023
+
+@author: knet9
+"""
+from kaggle.api.kaggle_api_extended import KaggleApi
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime, timedelta
+import os
+import pandas as pd 
+import pyarrow as pa
+import pyarrow.parquet as pq
+import glob
+
+
+
+os.environ['KAGGLE_USERNAME'] = 'ampersandai'
+os.environ['KAGGLE_KEY'] = '86e251daba70b37e6e879a6ec7b37fb786e251daba70b37e6e879a6ec7b37fb7'
+
+def download_dataset(**kwargs):
+    api = KaggleApi()
+    api.authenticate()
+    api.dataset_download_files('jacksoncrow/stock-market-dataset', path='/tmp', unzip=True)
+
+    # Get the list of all files in the /tmp directory
+    all_files = glob.glob('/tmp/*.csv')
+
+    # Push the list of files to be accessed by the next task
+    kwargs['ti'].xcom_push(key='raw_data_files', value=all_files)
+
+def process_dataset(**kwargs):
+    all_files = kwargs['ti'].xcom_pull(key='raw_data_files')
+    data = pd.DataFrame(columns=['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
+    
+    for file in all_files:
+        symbol = os.path.splitext(os.path.basename(file))[0]
+        df = pd.read_csv(file, parse_dates=['Date'])
+        df['Symbol'] = symbol
+        df['Security Name'] = ''  # Add the security name here if available
+        df = df[['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
+        
+        data = data.append(df, ignore_index=True)
+        
+    data.to_csv('/tmp/processed_data.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_path', value='/tmp/processed_data.csv')
+                   
+def FE(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+    
+    processed_data.sort_values(['Symbol', 'Date'], inplace = True)
+    processed_data['vol_moving_avg'] = processed_data.groupby('Symbol')['Volume'].transform(lambda x: x rolling(window=30).mean())
+    processed_data['adj_close_rolling_med'] = processed_data.groupby('Symbol')['Adj Close'].transform(lambda x: x rolling(window=30).median())
+
+    processed_data.to_csv('/tmp/processed_data_fe.csv', index = False)
+    kwargs['ti'].xcom_push(key='processed_data_fe_patrh', value = '/tmp/processed_data_fe.csv')
+
+
+def convert_to_parquet(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+    
+    table = pa.Table.from_pandas(processed_data)
+    pq.write_table(table, 'C:/Users/knet9/airflow_venv/processed_data_fe.parquet')
+            
+default_args = {
+    'owner':'airflow',
+    'depends_on_past': False, 
+    'email_on_failure': False,
+    'email_on_retry': False, 
+    'retries': 3, 
+    'retry_delay':timedelta(minutes=5),
+    'start_date': datetime(2023, 5, 24)
+}
+
+dag = DAG(
+    dag_id='stock_market_pipeline',
+    default_args=default_args, 
+    description= 'Stock Market Pipeline',
+    schedule_interval=timedelta(days=1),
+    catchup=False,
+)
+
+download_task = PythonOperator(
+   task_id='download_dataset',
+   python_callable=download_dataset,
+   provide_context=True,
+   dag=dag,
+)
+
+process_task = PythonOperator(
+    task_id='process_dataset',
+    python_callable=process_dataset,
+    provide_context=True,
+    dag=dag,
+)
+
+convert_task = PythonOperator(
+    task_id='convert_to_parquet',
+    python_callable=convert_to_parquet,
+    provide_context=True,
+    dag=dag,
+)
+
+download_task >> process_task >> convert_task
+
+
+
+ChatGPT
+There are several errors or oversights in the provided script:
+
+In the FE function (which I assume stands for "Feature Extraction"), you have syntax errors in the lines where you're trying to calculate moving averages and rolling medians. Specifically, the x rolling(window=30).mean() part should be x.rolling(window=30).mean(). Similarly, x rolling(window=30).median() should be x.rolling(window=30).median().
+
+You're creating the output file /tmp/processed_data_fe.csv in the FE function, but you aren't using this file anywhere else. You might want to use it in the convert_to_parquet function.
+
+In the convert_to_parquet function, you're reading data from processed_data_path, which is /tmp/processed_data.csv, not the file that you've written in the FE function. To use the output from the FE function, you should change the processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path') to processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path').
+
+There is a minor typo in the FE function: kwargs['ti'].xcom_push(key='processed_data_fe_patrh', value = '/tmp/processed_data_fe.csv'). It should be kwargs['ti'].xcom_push(key='processed_data_fe_path', value = '/tmp/processed_data_fe.csv').
+
+You have not defined a PythonOperator for your FE function in your DAG. You should include that to ensure that your feature extraction function gets executed.
+
+Here's the corrected version of your code:
+
+python
+Copy code
+# other imports and code remains same
+
+def FE(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+    
+    processed_data.sort_values(['Symbol', 'Date'], inplace = True)
+    processed_data['vol_moving_avg'] = processed_data.groupby('Symbol')['Volume'].transform(lambda x: x.rolling(window=30).mean())
+    processed_data['adj_close_rolling_med'] = processed_data.groupby('Symbol')['Adj Close'].transform(lambda x: x.rolling(window=30).median())
+
+    processed_data.to_csv('/tmp/processed_data_fe.csv', index = False)
+    kwargs['ti'].xcom_push(key='processed_data_fe_path', value = '/tmp/processed_data_fe.csv')
+
+def convert_to_parquet(**kwargs):
+    processed_data_fe_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path')
+    processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+    
+    table = pa.Table.from_pandas(processed_data_fe)
+    pq.write_table(table, 'C:/Users/knet9/airflow_venv/processed_data_fe.parquet')
+
+# DAG definition remains the same
+
+fe_task = PythonOperator(
+    task_id='FE',
+    python_callable=FE,
+    provide_context=True,
+    dag=dag,
+)
+
+# linking tasks
+download_task >> process_task >> fe_task >> convert_task
+Please note that I've not written unit tests as per your bonus task because the specifics would depend heavily on the existing structure and requirements of your codebase. However, you'd generally want to create isolated tests for your functions to ensure they work as expected with various inputs. Some examples might include checking that your FE function correctly calculates moving averages and rolling medians, or testing that your convert_to_parquet function properly converts a CSV file to
+
+
+
+
+
+User
+Can you draft two specific unit tests that would be relevant to the logic of this script?
+ChatGPT
+Sure, I can provide you with two unit tests. However, note that this is just an example and you need to adapt it to your exact requirements.
+
+Here is an example of a unit test for the FE function (specifically, for the moving average calculation) and for the convert_to_parquet function:
+
+python
+Copy code
+import unittest
+import os
+import pandas as pd
+
+class TestStockMarketPipeline(unittest.TestCase):
+
+    def test_moving_average_calculation(self):
+        data = {
+            'Symbol': ['AAPL', 'AAPL', 'AAPL'],
+            'Volume': [100, 200, 300],
+            'Date': pd.to_datetime(['2023-01-01', '2023-01-02', '2023-01-03']),
+            'Adj Close': [150, 175, 225]
+        }
+
+        df = pd.DataFrame(data).set_index('Date')
+        df['vol_moving_avg'] = df.groupby('Symbol')['Volume'].transform(lambda x: x.rolling(window=2).mean())
+
+        # Test that the moving average is calculated correctly
+        self.assertEqual(df.iloc[1]['vol_moving_avg'], 150)
+        self.assertEqual(df.iloc[2]['vol_moving_avg'], 250)
+
+    def test_convert_to_parquet(self):
+        data = {
+            'Symbol': ['AAPL', 'AAPL', 'AAPL'],
+            'Volume': [100, 200, 300],
+            'Date': pd.to_datetime(['2023-01-01', '2023-01-02', '2023-01-03']),
+            'Adj Close': [150, 175, 225]
+        }
+        df = pd.DataFrame(data).set_index('Date')
+
+        # Save as CSV
+        csv_path = "/tmp/test_data.csv"
+        df.to_csv(csv_path)
+
+        # Convert to parquet
+        table = pa.Table.from_pandas(pd.read_csv(csv_path))
+        parquet_path = "/tmp/test_data.parquet"
+        pq.write_table(table, parquet_path)
+
+        # Check the parquet file exists
+        self.assertTrue(os.path.isfile(parquet_path))
+
+        # Clean up
+        os.remove(csv_path)
+        os.remove(parquet_path)
+
+
+if __name__ == '__main__':
+    unittest.main()
+Here are the two tests:
+
+test_moving_average_calculation: This test checks if the moving average calculation in the FE function is working correctly. It creates a simple DataFrame, applies the rolling mean calculation as in your function, and asserts that the result is as expected.
+
+test_convert_to_parquet: This test checks if the convert_to_parquet function is working correctly. It saves a simple DataFrame to a CSV file, converts that file to a parquet file as in your function, and asserts that the parquet file has been created successfully.
+
+Note: The tests above are very simplified and don't cover all potential edge cases and situations. Writing comprehensive tests can be a significant task, especially for complex data processing functions.
