@@ -1,0 +1,22 @@
+[2023-05-28 00:20:28,508] {taskinstance.py:896} INFO - Dependencies all met for <TaskInstance: stock_market_pipeline_fe.feature_engineering 2023-05-27T00:03:49.455537+00:00 [queued]>
+[2023-05-28 00:20:28,598] {taskinstance.py:896} INFO - Dependencies all met for <TaskInstance: stock_market_pipeline_fe.feature_engineering 2023-05-27T00:03:49.455537+00:00 [queued]>
+[2023-05-28 00:20:28,598] {taskinstance.py:1087} INFO - 
+--------------------------------------------------------------------------------
+[2023-05-28 00:20:28,598] {taskinstance.py:1088} INFO - Starting attempt 2 of 4
+[2023-05-28 00:20:28,599] {taskinstance.py:1089} INFO - 
+--------------------------------------------------------------------------------
+[2023-05-28 00:20:28,802] {taskinstance.py:1107} INFO - Executing <Task(PythonOperator): feature_engineering> on 2023-05-27T00:03:49.455537+00:00
+[2023-05-28 00:20:28,805] {standard_task_runner.py:52} INFO - Started process 3308 to run task
+[2023-05-28 00:20:28,807] {standard_task_runner.py:76} INFO - Running: ['***', 'tasks', 'run', 'stock_market_pipeline_fe', 'feature_engineering', '2023-05-27T00:03:49.455537+00:00', '--job-id', '18', '--pool', 'default_pool', '--raw', '--subdir', 'DAGS_FOLDER/stock_market_pipeline_fe.py', '--cfg-path', '/tmp/tmp4pi2guro', '--error-file', '/tmp/tmpxzhc1gal']
+[2023-05-28 00:20:28,809] {standard_task_runner.py:77} INFO - Job 18: Subtask feature_engineering
+[2023-05-28 00:20:28,938] {logging_mixin.py:104} INFO - Running <TaskInstance: stock_market_pipeline_fe.feature_engineering 2023-05-27T00:03:49.455537+00:00 [running]> on host a783e9c6e3ac
+[2023-05-28 00:20:29,423] {taskinstance.py:1302} INFO - Exporting the following env vars:
+AIRFLOW_CTX_DAG_OWNER=***_fe
+AIRFLOW_CTX_DAG_ID=stock_market_pipeline_fe
+AIRFLOW_CTX_TASK_ID=feature_engineering
+AIRFLOW_CTX_EXECUTION_DATE=2023-05-27T00:03:49.455537+00:00
+AIRFLOW_CTX_DAG_RUN_ID=scheduled__2023-05-27T00:03:49.455537+00:00
+[2023-05-28 00:20:29,533] {python.py:151} INFO - Done. Returned value was: None
+[2023-05-28 00:20:29,547] {taskinstance.py:1211} INFO - Marking task as SUCCESS. dag_id=stock_market_pipeline_fe, task_id=feature_engineering, execution_date=20230527T000349, start_date=20230528T002028, end_date=20230528T002029
+[2023-05-28 00:20:29,580] {taskinstance.py:1265} INFO - 1 downstream tasks scheduled from follow-on schedule check
+[2023-05-28 00:20:29,622] {local_task_job.py:149} INFO - Task exited with return code 0
