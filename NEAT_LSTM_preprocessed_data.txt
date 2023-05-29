@@ -1,0 +1,519 @@
+Please acknowledge this DAG script:
+# -*- coding: utf-8 -*-
+"""
+Created on Wed May  3 17:50:10 2023
+
+@author: knet9
+"""
+from kaggle.api.kaggle_api_extended import KaggleApi
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime, timedelta
+import os
+import pandas as pd 
+import pyarrow as pa
+from pyarrow import parquet as pq
+import glob
+
+
+
+os.environ['KAGGLE_USERNAME'] = 'ampersandai' # kaggle_username = os.environ.get('KAGGLE_USERNAME')
+os.environ['KAGGLE_KEY'] = 'f96702da2f2dff980e0d8ffa783e341f' # kaggle_key = os.environ.get('KAGGLE_KEY')
+
+def download_dataset(**kwargs):
+    api = KaggleApi()
+    api.authenticate()
+    api.dataset_download_files('jacksoncrow/stock-market-dataset', path='/tmp', unzip=True)
+
+    # Get the list of all files in the /tmp directory
+    all_files = glob.glob('/tmp/*.csv')
+
+    # Push the list of files to be accessed by the next task
+    kwargs['ti'].xcom_push(key='raw_data_files', value=all_files)
+
+def process_dataset(**kwargs):
+    all_files = kwargs['ti'].xcom_pull(key='raw_data_files')
+    data = pd.DataFrame(columns=['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
+    
+    for file in all_files:
+        symbol = os.path.splitext(os.path.basename(file))[0]
+        try:
+            df = pd.read_csv(file)
+            if 'Date' in df.columns:
+                df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')  # <-- This line here
+            else:
+                print(f"File {file} does not contain a 'Date' column. Skipping...")
+                continue
+        except Exception as e:
+            print(f"Error reading file {file}: {e}")
+            continue
+           
+        
+        df['Symbol'] = symbol
+        df['Security Name'] = ''  # Add the security name here if available
+        df = df[['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
+        
+        data = data.append(df, ignore_index=True)
+        
+        # Enforce data types
+    data = data.astype({
+        'Symbol': 'str',
+        'Security Name': 'str',
+        'Date': 'str',
+        'Open': 'float',
+        'High': 'float',
+        'Low': 'float',
+        'Close': 'float',
+        'Adj Close': 'float',
+        'Volume': 'float'  # Change to 'int' if your volume data are always integers
+    })
+
+        
+    data.to_csv('/tmp/processed_data.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_path', value='/tmp/processed_data.csv')
+                   
+def FE(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+    if processed_data['Date'].dtypes != 'datetime64[ns]':
+        processed_data['Date'] = pd.to_datetime(processed_data['Date']) 
+    
+    processed_data.sort_values(['Symbol', 'Date'], inplace = True)
+    processed_data['vol_moving_avg'] = processed_data.groupby('Symbol')['Volume'].transform(lambda x: x.rolling(window=30).mean())
+    processed_data['adj_close_rolling_med'] = processed_data.groupby('Symbol')['Adj Close'].transform(lambda x: x.rolling(window=30).median())
+
+    processed_data.to_csv('/tmp/processed_data_fe.csv', index = False)
+    kwargs['ti'].xcom_push(key='processed_data_fe_path', value = '/tmp/processed_data_fe.csv')
+
+
+def convert_to_parquet(**kwargs):
+    # Get the task instance
+    ti = kwargs['ti']
+
+    # Pull the input file path from XCom
+    processed_data_fe_path = ti.xcom_pull(key='processed_data_fe_path')
+
+    # Read the input file
+    processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+
+    # Convert the DataFrame to a PyArrow Table
+    table = pa.Table.from_pandas(processed_data_fe)
+
+    # Write the table to a Parquet file in the Linux subsystem directory
+    pq.write_table(table, '/home/airflow/processed_data_fe.parquet')
+
+
+def read_parquet(**kwargs):
+    df = pd.read_parquet('/home/airflow/processed_data_fe.parquet')
+    print(df)
+
+            
+default_args = {
+    'owner':'airflow_fe',
+    'depends_on_past': False, 
+    'email_on_failure': False,
+    'email_on_retry': False, 
+    'retries': 3, 
+    'retry_delay':timedelta(minutes=2),
+    'start_date': datetime(2023, 4, 26)
+}
+
+dag = DAG(
+    dag_id='stock_market_pipeline_fe',
+    default_args=default_args, 
+    description= 'Stock Market Pipeline FE',
+    schedule_interval=timedelta(days=1),
+    catchup=False,
+)
+
+download_task = PythonOperator(
+   task_id='download_dataset',
+   python_callable=download_dataset,
+   provide_context=True,
+   dag=dag,
+)
+
+process_task = PythonOperator(
+    task_id='process_dataset',
+    python_callable=process_dataset,
+    provide_context=True,
+    dag=dag,
+)
+
+fe_task = PythonOperator(
+    task_id='feature_engineering',
+    python_callable=FE,
+    provide_context=True,
+    dag=dag,
+)
+
+convert_task = PythonOperator(
+    task_id='convert_to_parquet',
+    python_callable=convert_to_parquet,
+    provide_context=True,
+    dag=dag,
+)
+
+read_task = PythonOperator(
+    task_id='read_parquet',
+    python_callable=convert_to_parquet,
+    provide_context=True,
+    dag=dag,
+)
+
+download_task >> process_task >> fe_task >> convert_task >> read_task
+
+ChatGPT
+The script you've provided is an Apache Airflow DAG (Directed Acyclic Graph) script written in Python. It is designed to orchestrate a data pipeline for stock market data. Here's a summary of what the script is doing:
+
+It starts by setting up Kaggle API credentials through environment variables, 'KAGGLE_USERNAME' and 'KAGGLE_KEY'.
+
+It then defines a series of functions, each of which is going to be a task in the DAG:
+
+download_dataset: This task downloads the 'stock-market-dataset' from Kaggle and stores it in the '/tmp' directory. It then pushes a list of downloaded files to XCom.
+
+process_dataset: This task reads the list of downloaded files from XCom, processes them and appends them to a pandas dataframe. The processed data is then written back to the '/tmp' directory as 'processed_data.csv' and its path is pushed to XCom.
+
+FE (Feature Engineering): This task reads the processed data, performs some feature engineering operations such as creating moving averages and medians, and stores the updated data back to the '/tmp' directory as 'processed_data_fe.csv'. The path to this file is then pushed to XCom.
+
+convert_to_parquet: This task reads the feature engineered data and converts it into a PyArrow table. This table is then written to a parquet file in the directory '/home/airflow'.
+
+read_parquet: This task reads the parquet file that was created in the previous task and prints it out.
+
+It then sets some default arguments for the DAG including the owner, retry policy, and start date.
+
+It initializes the DAG with an ID of 'stock_market_pipeline_fe', a description, and a schedule interval of once a day.
+
+Finally, it creates instances of PythonOperator for each task, setting the task ID, the python function to call, and indicating that context should be provided.
+
+It sets the order of tasks using the bit shift operator (>>), which in this context denotes that each task should be performed after the one before it. The order of tasks is: download_dataset -> process_dataset -> feature_engineering -> convert_to_parquet -> read_parquet.
+
+Please note that there's a mistake in the script: read_parquet function should be the callable in read_task instead of convert_to_parquet. Also, it's considered a bad practice to expose the API key in the script. It's recommended to use environment variables or a secure vault to store sensitive information.
+
+
+
+
+
+User
+I want to integrate a Machine Learning Predictive Model Training Step into the data problem and I want to use the neuroevolution of augmenting topologies model. Would you be able to assist with the implementation of this model into the DAG Script.
+ChatGPT
+In order to implement a Machine Learning Predictive Model Training Step using the neuroevolution of augmenting topologies (NEAT) model in your DAG, you will first need to install a Python library that implements NEAT. There are several such libraries, one of the most popular being NEAT-Python. Assuming you have already trained and validated a NEAT model, below is a high-level implementation.
+
+Firstly, you need to create the Python function to train your model. This function will be added as a new task in your pipeline. The details of the training function will depend on the specific nature of your model, but it might look something like this:
+
+python
+Copy code
+def train_model(**kwargs):
+    # Load your data
+    processed_data_fe_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path')
+    processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+
+    # Preprocess data and split into features and target variable
+    X, y = preprocess_data(processed_data_fe) 
+
+    # Define the configuration for the NEAT model
+    config = neat.Config(MyGenome, MyReproduction, MySpeciesSet, MyStagnation, config_file)
+
+    # Create the population, which is the top-level object for a NEAT run
+    p = neat.Population(config)
+
+    # Add a stdout reporter to show progress in the terminal
+    p.add_reporter(neat.StdOutReporter(True))
+
+    # Run the NEAT model for a certain number of generations
+    winner = p.run(eval_genomes, n_generations)
+    
+    # save your model
+    with open('/path/to/save/model.pkl', 'wb') as output:
+        pickle.dump(winner, output, 1)
+    
+    # Save the model path to xcom
+    kwargs['ti'].xcom_push(key='model_path', value='/path/to/save/model.pkl')
+Remember to replace the placeholders with the actual names or values relevant to your use case.
+
+You then add this new task to your DAG as follows:
+
+python
+Copy code
+train_model_task = PythonOperator(
+    task_id='train_model',
+    python_callable=train_model,
+    provide_context=True,
+    dag=dag,
+)
+And adjust the order of operations to include this new task:
+
+python
+Copy code
+download_task >> process_task >> fe_task >> convert_task >> train_model_task >> read_task
+Please note that using NEAT for training a predictive model can be quite complex and requires a good understanding of how NEAT works. The example given is quite simple and might not cover all use cases. For example, depending on your dataset, you might need to do additional preprocessing before training your model, or additional configuration for your NEAT model.
+
+In the provided script, the NEAT model is trained for a fixed number of generations. In practice, you would probably want to use some form of early stopping, or another method, to decide when to stop training. Also, it's recommended to check the performance of your trained model before using it for prediction.
+
+
+
+
+
+User
+This statement is returning an error. Can you troubleshoot it for me:
+        # Preprocess data and split into features and target variable
+        X, y = preprocess_data(processed_data_fe)
+ChatGPT
+The error you're experiencing could be caused by a variety of issues. However, without additional information, it's a bit challenging to provide a precise solution. Here are a few things you could consider:
+
+Definition of preprocess_data(): Make sure that you've defined a preprocess_data() function in your script that takes a DataFrame as input and returns two values. If the function isn't defined, you'll get a NameError.
+
+Output of preprocess_data(): The function preprocess_data() must return two values since you're trying to unpack its result into X and y. If it doesn't return two values, you'll get a ValueError.
+
+Input to preprocess_data(): Ensure that the variable processed_data_fe is correctly defined and is a DataFrame, which seems to be what your function expects. If processed_data_fe is not a DataFrame or is not defined, you'll get a NameError.
+
+Here's a simple example of what the preprocess_data() function might look like:
+
+python
+Copy code
+def preprocess_data(df):
+    # assuming 'target' is the name of your target variable
+    y = df['target']
+    X = df.drop('target', axis=1)
+    return X, y
+If these suggestions don't help, please provide the error message you're seeing, and I'll be happy to assist further.
+
+
+
+
+
+User
+does this path work for DAG Script:
+# Define the path to your config file
+config_file = '/home/airflow/config_file.txt'
+ChatGPT
+The provided path /home/airflow/config_file.txt should work in your Directed Acyclic Graph (DAG) script, assuming that:
+
+The config_file.txt exists at the specified location, i.e., /home/airflow/.
+The file has the appropriate permissions that allow your script to read it.
+The user running the Airflow worker has the appropriate permissions to access and read the file.
+Please note that file paths can be absolute or relative in a DAG script. The path you provided is an absolute path. If the file doesn't exist at the specified location or if the script doesn't have the necessary permissions to access it, an error will occur.
+
+If you're running this in a dockerized environment, make sure that the file is available within the Docker container. You might need to set up a volume for this in your Docker configuration.
+
+If you're still encountering issues, please provide the error message for further assistance.
+
+
+
+
+
+User
+This was the entire training function:
+# Your training function
+def train_model(**kwargs):
+    try:
+        # Load your data
+        processed_data_fe_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path')
+        processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+
+        # Preprocess data and split into features and target variable
+        X, y = preprocess_data(processed_data_fe)
+
+        # Define the configuration for the NEAT model
+        config = Config(DefaultGenome, DefaultReproduction,
+                        DefaultSpeciesSet, DefaultStagnation,
+                        config_file)
+
+        # Create the population, which is the top-level object for a NEAT run
+        p = Population(config)
+
+        # Add a stdout reporter to show progress in the terminal
+        p.add_reporter(StdOutReporter(True))
+
+        # Run the NEAT model for a certain number of generations
+        winner = p.run(eval_genomes, n_generations)
+
+        # Define your dynamic model path
+        model_path = os.path.join(os.environ['AIRFLOW_HOME'], 'dags', 'model.pkl')
+        
+        # Save your model
+        with open(model_path, 'wb') as output:
+            pickle.dump(winner, output, 1)
+
+        # Save the model path to xcom
+        kwargs['ti'].xcom_push(key='model_path', value=model_path)
+    
+    except Exception as e:
+        logging.error("Error in train_model: ", e)
+        raise
+ChatGPT
+Your training function seems to be organized well and implements the NEAT model training process as expected.
+
+However, please note the following key elements that you need to define somewhere in your script or another imported module:
+
+preprocess_data(): This function should be defined to preprocess your data and split it into features (X) and target (y) variables.
+
+Config, DefaultGenome, DefaultReproduction, DefaultSpeciesSet, DefaultStagnation, Population, and StdOutReporter are all assumed to be imported from the neat-python package.
+
+config_file: You need to define this variable to be the path of your NEAT configuration file.
+
+eval_genomes function: This function is specific to your problem, you should define it. It evaluates the performance of the genomes (in this case, the neural networks) in the population.
+
+n_generations: This is the number of generations for which you want to evolve your population. It should be a positive integer.
+
+os, pickle, and logging should be imported at the top of your script.
+
+Ensure that the model.pkl file has write permissions and that the location where you're trying to save the model is correct and writable.
+
+If any of these elements are not correctly defined, you might get errors when running the function. Make sure you've checked all these points, and if you're still encountering issues, please provide the specific error message for more detailed help.
+
+
+
+
+
+User
+How would point 1. be represented in the script?
+ChatGPT
+The preprocess_data() function is meant to prepare your data for the machine learning model. It usually involves steps like cleaning the data, handling missing values, creating dummy variables, feature scaling, and so on.
+
+In the context of your question, it appears that preprocess_data() is expected to split the dataset into features (X) and a target variable (y). Typically, this might look like this:
+
+python
+Copy code
+def preprocess_data(df):
+    # This is a simple example. You would typically perform more preprocessing steps.
+
+    # Assuming 'target' is the name of your target column.
+    # Replace 'target' with the actual name of the target column.
+    y = df['target']
+    X = df.drop('target', axis=1)  # Remove the target column from the features.
+
+    return X, y
+This function takes a DataFrame df as input, separates the target column (which you should replace with your actual target column name) from the rest of the DataFrame, and returns two separate DataFrames: X for the features and y for the target.
+
+Remember to replace 'target' with the name of the column in your DataFrame that represents the target variable for your predictive model.
+
+Please note that the above code is a very basic example. In real-world scenarios, data preprocessing might involve more complex operations such as handling missing values, data normalization, encoding categorical variables, etc. The specifics would depend on the nature of your data and the requirements of the model you are using.
+
+Please continue from "Make sure you define 'y' in the function `split_data(df"
+ChatGPT
+Apologies for the incomplete sentence. I meant to say that you need to ensure you define 'y' correctly in your split_data(df) function. 'y' should represent the target variable you are trying to predict.
+
+In your previous script, you mentioned 'y' as 'y_pred', which suggests that 'y_pred' is the predicted value. In a training scenario, you would typically have a known target value, such as a stock price on the next day, or a price after some number of days, which you're trying to predict based on previous data. You need to ensure this column is correctly prepared in your data preprocessing stage.
+
+For instance, if you're trying to predict the 'Close' price for the next day based on previous data, your 'y' could be the 'Close' price. The function could look something like this:
+
+python
+Copy code
+# Split data into features and target variable
+def split_data(df):
+    y = df['Close']
+    X = df.drop('Close', axis=1)
+    return X, y
+In this example, 'y' is the 'Close' column of the DataFrame, and 'X' is all other columns. It's important to adjust this function based on your specific use case and the structure of your DataFrame.
+
+Finally, you would need to shift your data appropriately if you're predicting future data based on past data. For instance, if you're predicting the next day's closing price, you might need to shift your 'Close' column by one, so each row's 'Close' price corresponds to the next day's actual closing price. This will be dependent on your specific use case and how you set up your data for time-series prediction.
+
+
+
+
+
+User
+
+2 / 2
+
+Within this problem I also need to ensure that I have persisted the training metrics such as loss and error values as log files. 
+
+I currently have the model saved to disk, but I have not successfully included the necessary statements that would persist the training metrics within the train_model function:
+# Training function
+def train_model(**kwargs):
+    # Load your data
+    processed_data_fe_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path')
+    processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+
+    # Preprocess data
+    processed_data_scaled = preprocess_data(processed_data_fe)
+    
+    # Split into features and target variable
+    X, y = split_data(processed_data_scaled)
+
+    # Reshape input to be 3D [samples, timesteps, features] as required for LSTM
+    X = X.values.reshape((X.shape[0], 1, X.shape[1]))
+    
+    # Split into train and test sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Define your model
+    model = create_model((X_train.shape[1], X_train.shape[2]))
+
+    # Define early stopping
+    es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=50)
+    
+    # Fit your model
+    model.fit(X_train, y_train, epochs=100, batch_size=32, verbose=0, validation_data=(X_test, y_test), callbacks=[es])
+    
+    
+    
+    # Save your model
+    model.save('/home/airflow/model.h5')
+
+    # Save the model path to xcom
+    kwargs['ti'].xcom_push(key='model_path', value='/home/airflow/model.h5')
+ChatGPT
+Keras provides a History object as output from the fit() function used to train the model. This object keeps a record of the loss values and metric values during training. You can use this History object to create your log file.
+
+Here is a modification of your train_model function with the necessary code for saving the loss and error values:
+
+python
+Copy code
+# Training function
+def train_model(**kwargs):
+    # Load your data
+    processed_data_fe_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path')
+    processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+
+    # Preprocess data
+    processed_data_scaled = preprocess_data(processed_data_fe)
+    
+    # Split into features and target variable
+    X, y = split_data(processed_data_scaled)
+
+    # Reshape input to be 3D [samples, timesteps, features] as required for LSTM
+    X = X.values.reshape((X.shape[0], 1, X.shape[1]))
+    
+    # Split into train and test sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Define your model
+    model = create_model((X_train.shape[1], X_train.shape[2]))
+
+    # Define early stopping
+    es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=50)
+    
+    # Fit your model
+    history = model.fit(X_train, y_train, epochs=100, batch_size=32, verbose=0, validation_data=(X_test, y_test), callbacks=[es])
+    
+    # Save your model
+    model.save('/home/airflow/model.h5')
+
+    # Save the model path to xcom
+    kwargs['ti'].xcom_push(key='model_path', value='/home/airflow/model.h5')
+    
+    # Convert the history.history dict to a pandas DataFrame
+    hist_df = pd.DataFrame(history.history)
+    
+    # Save to csv
+    hist_csv_file = '/home/airflow/history.csv'
+    with open(hist_csv_file, mode='w') as f:
+        hist_df.to_csv(f)
+In this script, history = model.fit() saves the training history into a variable. Afterwards, we convert this history (which is a dictionary) into a pandas DataFrame, and then write it into a csv file. Now, you will have a record of loss and metrics for each epoch in '/home/airflow/history.csv'. You can change the file path and name according to your needs.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

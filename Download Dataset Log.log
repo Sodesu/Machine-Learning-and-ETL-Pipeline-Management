@@ -1,0 +1,22 @@
+[2023-05-28 23:47:03,931] {taskinstance.py:896} INFO - Dependencies all met for <TaskInstance: stock_market_pipeline.download_dataset 2023-05-28T23:47:02.030916+00:00 [queued]>
+[2023-05-28 23:47:04,219] {taskinstance.py:896} INFO - Dependencies all met for <TaskInstance: stock_market_pipeline.download_dataset 2023-05-28T23:47:02.030916+00:00 [queued]>
+[2023-05-28 23:47:04,220] {taskinstance.py:1087} INFO - 
+--------------------------------------------------------------------------------
+[2023-05-28 23:47:04,220] {taskinstance.py:1088} INFO - Starting attempt 1 of 3
+[2023-05-28 23:47:04,220] {taskinstance.py:1089} INFO - 
+--------------------------------------------------------------------------------
+[2023-05-28 23:47:04,944] {taskinstance.py:1107} INFO - Executing <Task(PythonOperator): download_dataset> on 2023-05-28T23:47:02.030916+00:00
+[2023-05-28 23:47:04,947] {standard_task_runner.py:52} INFO - Started process 391 to run task
+[2023-05-28 23:47:04,950] {standard_task_runner.py:76} INFO - Running: ['***', 'tasks', 'run', 'stock_market_pipeline', 'download_dataset', '2023-05-28T23:47:02.030916+00:00', '--job-id', '19', '--pool', 'default_pool', '--raw', '--subdir', 'DAGS_FOLDER/stock_market_pipeline.py', '--cfg-path', '/tmp/tmpx3eix6yx', '--error-file', '/tmp/tmpivmpwfyx']
+[2023-05-28 23:47:04,951] {standard_task_runner.py:77} INFO - Job 19: Subtask download_dataset
+[2023-05-28 23:47:05,440] {logging_mixin.py:104} INFO - Running <TaskInstance: stock_market_pipeline.download_dataset 2023-05-28T23:47:02.030916+00:00 [running]> on host 0d68909d4153
+[2023-05-28 23:47:05,953] {taskinstance.py:1302} INFO - Exporting the following env vars:
+AIRFLOW_CTX_DAG_OWNER=***
+AIRFLOW_CTX_DAG_ID=stock_market_pipeline
+AIRFLOW_CTX_TASK_ID=download_dataset
+AIRFLOW_CTX_EXECUTION_DATE=2023-05-28T23:47:02.030916+00:00
+AIRFLOW_CTX_DAG_RUN_ID=manual__2023-05-28T23:47:02.030916+00:00
+[2023-05-28 23:47:06,590] {python.py:151} INFO - Done. Returned value was: None
+[2023-05-28 23:47:06,599] {taskinstance.py:1211} INFO - Marking task as SUCCESS. dag_id=stock_market_pipeline, task_id=download_dataset, execution_date=20230528T234702, start_date=20230528T234703, end_date=20230528T234706
+[2023-05-28 23:47:06,620] {taskinstance.py:1265} INFO - 1 downstream tasks scheduled from follow-on schedule check
+[2023-05-28 23:47:06,646] {local_task_job.py:149} INFO - Task exited with return code 0
