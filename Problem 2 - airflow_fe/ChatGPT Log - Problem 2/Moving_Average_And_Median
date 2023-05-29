@@ -1,0 +1,1107 @@
+I have a task I am attempting to complete. Problem 2 is describes this task:
+Objective: Build some feature engineering on top of the dataset from Problem 1.
+
+Tasks:
+Calculate the moving average of the trading volume (Volume) of 30 days per each stock and ETF, and retain it in a newly added column vol_moving_avg.
+Similarly, calculate the rolling median and retain it in a newly added column adj_close_rolling_med.
+Retain the resulting dataset into the same format as Problem 1, but in its own stage/directory distinct from the first.
+(Bonus) Write unit tests for any relevant logic.Objective: Build some feature engineering on top of the dataset from Problem 1.
+
+Tasks:
+Calculate the moving average of the trading volume (Volume) of 30 days per each stock and ETF, and retain it in a newly added column vol_moving_avg.
+Similarly, calculate the rolling median and retain it in a newly added column adj_close_rolling_med.
+Retain the resulting dataset into the same format as Problem 1, but in its own stage/directory distinct from the first.
+(Bonus) Write unit tests for any relevant logic.
+
+And in the first problem, this was the DAG Script I created:
+from kaggle.api.kaggle_api_extended import KaggleApi
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime, timedelta
+import os
+import pandas as pd 
+import pyarrow as pa
+import pyarrow.parquet as pq
+import glob
+
+
+
+os.environ['KAGGLE_USERNAME'] = 'ampersandai'
+os.environ['KAGGLE_KEY'] = '86e251daba70b37e6e879a6ec7b37fb786e251daba70b37e6e879a6ec7b37fb7'
+
+def download_dataset(**kwargs):
+    api = KaggleApi()
+    api.authenticate()
+    api.dataset_download_files('jacksoncrow/stock-market-dataset', path='/tmp', unzip=True)
+
+    # Get the list of all files in the /tmp directory
+    all_files = glob.glob('/tmp/*.csv')
+
+    # Push the list of files to be accessed by the next task
+    kwargs['ti'].xcom_push(key='raw_data_files', value=all_files)
+
+def process_dataset(**kwargs):
+    all_files = kwargs['ti'].xcom_pull(key='raw_data_files')
+    data = pd.DataFrame(columns=['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
+    
+    for file in all_files:
+        symbol = os.path.splitext(os.path.basename(file))[0]
+        df = pd.read_csv(file, parse_dates=['Date'])
+        df['Symbol'] = symbol
+        df['Security Name'] = ''  # Add the security name here if available
+        df = df[['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
+        
+        data = data.append(df, ignore_index=True)
+        
+    data.to_csv('/tmp/processed_data.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_path', value='/tmp/processed_data.csv')
+
+def convert_to_parquet(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+    
+    table = pa.Table.from_pandas(processed_data)
+    pq.write_table(table, 'C:/Users/knet9/airflow_venv/processed_data.parquet')
+            
+default_args = {
+    'owner':'airflow',
+    'depends_on_past': False, 
+    'email_on_failure': False,
+    'email_on_retry': False, 
+    'retries': 3, 
+    'retry_delay':timedelta(minutes=5),
+    'start_date': datetime(2023, 5, 19)
+}
+
+dag = DAG(
+    dag_id='stock_market_pipeline',
+    default_args=default_args, 
+    description= 'Stock Market Pipeline',
+    schedule_interval=timedelta(days=1),
+    catchup=False,
+)
+
+download_task = PythonOperator(
+   task_id='download_dataset',
+   python_callable=download_dataset,
+   provide_context=True,
+   dag=dag,
+)
+
+process_task = PythonOperator(
+    task_id='process_dataset',
+    python_callable=process_dataset,
+    provide_context=True,
+    dag=dag,
+)
+
+convert_task = PythonOperator(
+    task_id='convert_to_parquet',
+    python_callable=convert_to_parquet,
+    provide_context=True,
+    dag=dag,
+)
+
+download_task >> process_task >> convert_task
+
+
+ChatGPT
+For problem 2, you can modify the process_dataset function to include moving average and rolling median calculations. You can use the rolling() function of pandas DataFrame to compute these. The moving average can be calculated using the mean() function, and the rolling median can be calculated using the median() function after calling rolling().
+
+Here is how you can modify your script:
+
+python
+Copy code
+def process_dataset_v2(**kwargs):
+    all_files = kwargs['ti'].xcom_pull(key='raw_data_files')
+    data = pd.DataFrame(columns=['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
+    
+    for file in all_files:
+        symbol = os.path.splitext(os.path.basename(file))[0]
+        df = pd.read_csv(file, parse_dates=['Date'])
+        df['Symbol'] = symbol
+        df['Security Name'] = ''  # Add the security name here if available
+        df = df[['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
+        
+        # Add the moving average and rolling median calculations
+        df['vol_moving_avg'] = df['Volume'].rolling(window=30).mean()
+        df['adj_close_rolling_med'] = df['Adj Close'].rolling(window=30).median()
+
+        data = data.append(df, ignore_index=True)
+        
+    data.to_csv('/tmp/processed_data_v2.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_path', value='/tmp/processed_data_v2.csv')
+
+process_task_v2 = PythonOperator(
+    task_id='process_dataset_v2',
+    task_id='process_dataset_v2',
+    python_callable=process_dataset_v2,
+    provide_context=True,
+    dag=dag,
+)
+
+# Change the dependency of the convert_task to process_task_v2
+download_task >> process_task_v2 >> convert_task
+This script will create a new CSV file processed_data_v2.csv, which contains two additional columns - 'vol_moving_avg' and 'adj_close_rolling_med'.
+
+For the bonus task of writing unit tests, here's a sample unit test for the moving average function:
+
+python
+Copy code
+import numpy as np
+
+def test_moving_average():
+    df = pd.DataFrame({
+        'Volume': np.random.randint(0, 100, size=(100,))
+    })
+    
+    df['vol_moving_avg'] = df['Volume'].rolling(window=30).mean()
+    
+    for i in range(30, 100):
+        assert df['vol_moving_avg'][i] == df['Volume'][i-30:i].mean(), f"Moving average calculation failed at index {i}"
+
+test_moving_average()
+This test creates a random DataFrame with the 'Volume' column, calculates the moving average, and then checks if the moving average at each point is equal to the mean of the previous 30 points. If the assertion fails at any point, it means that the moving average calculation is incorrect. Similar tests can be written for the rolling median calculation.
+
+
+
+
+
+User
+Shouldn't it be built on top like so:
+def feature_engineering(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+
+    # Ensure data is sorted by date for each stock
+    processed_data.sort_values(['Symbol', 'Date'], inplace=True)
+    
+    # Calculate moving average of trading volume over 30 days
+    processed_data['vol_moving_avg'] = processed_data.groupby('Symbol')['Volume'].transform(lambda x: x.rolling(window=30).mean())
+    
+    # Calculate rolling median of adjusted closing price
+    processed_data['adj_close_rolling_med'] = processed_data.groupby('Symbol')['Adj Close'].transform(lambda x: x.rolling(window=30).median())
+
+    # Save the processed data with new features as a CSV file in a new directory
+    processed_data.to_csv('/tmp/processed_data_fe.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_fe_path', value='/tmp/processed_data_fe.csv')
+
+def convert_fe_to_parquet(**kwargs):
+    processed_data_fe_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path')
+    processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+    
+    # Convert the DataFrame to a PyArrow Table and write it as a Parquet file
+    table = pa.Table.from_pandas(processed_data_fe)
+    pq.write_table(table, '/tmp/processed_data_fe.parquet')
+ChatGPT
+Yes, you are absolutely right, and I apologize for the oversight. In Problem 2, you are asked to build on top of the dataset from Problem 1. This means using the processed data and adding more features (moving average and rolling median) to it.
+
+Your approach of defining a new function, feature_engineering, to handle these calculations is completely valid.
+
+You correctly use groupby('Symbol') to calculate moving averages and rolling medians separately for each stock, and you also sort the data by date to ensure that the rolling calculations are accurate. This is important when dealing with time series data.
+
+Here is the updated DAG:
+
+python
+Copy code
+feature_engineering_task = PythonOperator(
+    task_id='feature_engineering',
+    python_callable=feature_engineering,
+    provide_context=True,
+    dag=dag,
+)
+
+convert_fe_task = PythonOperator(
+    task_id='convert_fe_to_parquet',
+    python_callable=convert_fe_to_parquet,
+    provide_context=True,
+    dag=dag,
+)
+
+# Create new dependencies
+download_task >> process_task >> feature_engineering_task >> convert_fe_task
+This will ensure that the DAG first downloads the data, processes it, adds new features to it, and then saves it as a Parquet file. The 'feature_engineering_task' and 'convert_fe_task' are chained after 'process_task' in the DAG.
+
+You may also want to keep your existing convert_to_parquet task if you wish to keep a version of the data without the new features. If that's the case, you would have two branches after the process_task, one leading to feature_engineering_task and another to convert_task.
+
+
+
+
+
+User
+can you write out the entire script accounting for this modification?
+ChatGPT
+Of course, here's your complete modified script with the new feature_engineering task and convert_fe_to_parquet task:
+
+python
+Copy code
+from kaggle.api.kaggle_api_extended import KaggleApi
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime, timedelta
+import os
+import pandas as pd 
+import pyarrow as pa
+import pyarrow.parquet as pq
+import glob
+
+os.environ['KAGGLE_USERNAME'] = 'ampersandai'
+os.environ['KAGGLE_KEY'] = '86e251daba70b37e6e879a6ec7b37fb786e251daba70b37e6e879a6ec7b37fb7'
+
+def download_dataset(**kwargs):
+    api = KaggleApi()
+    api.authenticate()
+    api.dataset_download_files('jacksoncrow/stock-market-dataset', path='/tmp', unzip=True)
+
+    all_files = glob.glob('/tmp/*.csv')
+    kwargs['ti'].xcom_push(key='raw_data_files', value=all_files)
+
+def process_dataset(**kwargs):
+    all_files = kwargs['ti'].xcom_pull(key='raw_data_files')
+    data = pd.DataFrame(columns=['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
+    
+    for file in all_files:
+        symbol = os.path.splitext(os.path.basename(file))[0]
+        df = pd.read_csv(file, parse_dates=['Date'])
+        df['Symbol'] = symbol
+        df['Security Name'] = '' 
+        df = df[['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
+        
+        data = data.append(df, ignore_index=True)
+        
+    data.to_csv('/tmp/processed_data.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_path', value='/tmp/processed_data.csv')
+
+def feature_engineering(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+
+    processed_data.sort_values(['Symbol', 'Date'], inplace=True)
+    processed_data['vol_moving_avg'] = processed_data.groupby('Symbol')['Volume'].transform(lambda x: x.rolling(window=30).mean())
+    processed_data['adj_close_rolling_med'] = processed_data.groupby('Symbol')['Adj Close'].transform(lambda x: x.rolling(window=30).median())
+
+    processed_data.to_csv('/tmp/processed_data_fe.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_fe_path', value='/tmp/processed_data_fe.csv')
+
+def convert_to_parquet(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+    
+    table = pa.Table.from_pandas(processed_data)
+    pq.write_table(table, '/tmp/processed_data.parquet')
+
+def convert_fe_to_parquet(**kwargs):
+    processed_data_fe_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path')
+    processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+    
+    table = pa.Table.from_pandas(processed_data_fe)
+    pq.write_table(table, '/tmp/processed_data_fe.parquet')
+
+default_args = {
+    'owner':'airflow',
+    'depends_on_past': False, 
+    'email_on_failure': False,
+    'email_on_retry': False, 
+    'retries': 3, 
+   
+
+
+
+
+User
+please continue
+ChatGPT
+Sure, I apologize for the cutoff. Continuing from where we left off:
+
+python
+Copy code
+    'retry_delay': timedelta(minutes=5),
+    'start_date': datetime(2023, 5, 19)
+}
+
+dag = DAG(
+    dag_id='stock_market_pipeline',
+    default_args=default_args, 
+    description= 'Stock Market Pipeline',
+    schedule_interval=timedelta(days=1),
+    catchup=False,
+)
+
+download_task = PythonOperator(
+   task_id='download_dataset',
+   python_callable=download_dataset,
+   provide_context=True,
+   dag=dag,
+)
+
+process_task = PythonOperator(
+    task_id='process_dataset',
+    python_callable=process_dataset,
+    provide_context=True,
+    dag=dag,
+)
+
+feature_engineering_task = PythonOperator(
+    task_id='feature_engineering',
+    python_callable=feature_engineering,
+    provide_context=True,
+    dag=dag,
+)
+
+convert_task = PythonOperator(
+    task_id='convert_to_parquet',
+    python_callable=convert_to_parquet,
+    provide_context=True,
+    dag=dag,
+)
+
+convert_fe_task = PythonOperator(
+    task_id='convert_fe_to_parquet',
+    python_callable=convert_fe_to_parquet,
+    provide_context=True,
+    dag=dag,
+)
+
+# Set up the dependencies
+download_task >> process_task >> feature_engineering_task >> convert_fe_task
+Now the DAG consists of five tasks: downloading the dataset, processing the dataset, adding new features to the dataset, converting the original processed dataset to parquet, and converting the dataset with new features to parquet. The convert_task and convert_fe_task are done separately. Please make sure to adjust your DAG and tasks according to your requirements.
+
+
+
+
+
+User
+Are you sure this is correct? What Unit tests could be included for relevant logic?
+ChatGPT
+In the DAG script, you're correct that the convert_to_parquet task isn't needed anymore since the original processed data isn't being converted to Parquet.
+
+The workflow should be: download the data, process it, perform feature engineering (where new features are added), and finally convert the data (with new features) to a Parquet file. The dependencies should reflect this: download_task >> process_task >> feature_engineering_task >> convert_fe_task.
+
+Regarding unit tests, they can be written for each of the Python functions you've defined to ensure they're working as expected.
+
+Here are some examples of unit tests for the process_dataset and feature_engineering functions:
+
+python
+Copy code
+import unittest
+import pandas as pd
+from unittest.mock import patch
+
+class TestPipeline(unittest.TestCase):
+    @patch('builtins.open', new_callable=mock_open, read_data='Symbol,Date,Open,High,Low,Close,Adj Close,Volume\nAAPL,2023-05-19,123.45,125.23,122.67,124.67,124.67,50000000\n')
+    def test_process_dataset(self):
+        kwargs = {'ti': MagicMock()}
+        kwargs['ti'].xcom_pull.return_value = ['AAPL.csv']
+
+        process_dataset(**kwargs)
+
+        processed_data_path = kwargs['ti'].xcom_push.call_args[0][1]
+        processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+        
+        self.assertEqual(processed_data.shape[0], 1)
+        self.assertEqual(processed_data['Symbol'].values[0], 'AAPL')
+
+    @patch('builtins.open', new_callable=mock_open, read_data='Symbol,Security Name,Date,Open,High,Low,Close,Adj Close,Volume\nAAPL,,2023-05-19,123.45,125.23,122.67,124.67,124.67,50000000\n')
+    def test_feature_engineering(self):
+        kwargs = {'ti': MagicMock()}
+        kwargs['ti'].xcom_pull.return_value = '/tmp/processed_data.csv'
+
+        feature_engineering(**kwargs)
+
+        processed_data_fe_path = kwargs['ti'].xcom_push.call_args[0][1]
+        processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+        
+        self.assertIn('vol_moving_avg', processed_data_fe.columns)
+        self.assertIn('adj_close_rolling_med', processed_data_fe.columns)
+        
+if __name__ == '__main__':
+    unittest.main()
+These are very simple unit tests and real tests should be more comprehensive, checking for more conditions and edge cases. Also, the process_dataset test uses the mock package to simulate the presence of a CSV file and the feature_engineering test assumes the existence of '/tmp/processed_data.csv'. In your actual tests, you may need to set up a real environment to have these files ready for testing.
+
+Remember that these tests are not exhaustive and they are meant to serve as starting points. It's generally a good idea to have as comprehensive test coverage as possible, but the exact tests you'll want to include will depend on the specifics of your data and use case.
+
+
+
+
+
+User
+
+2 / 2
+
+please may you write the entirety of the updated DAG scrpt so that I can run it in the Apache Airflow docker container?
+ChatGPT
+Absolutely, here's the entire updated script:
+
+python
+Copy code
+from kaggle.api.kaggle_api_extended import KaggleApi
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime, timedelta
+import os
+import pandas as pd 
+import pyarrow as pa
+import pyarrow.parquet as pq
+import glob
+
+os.environ['KAGGLE_USERNAME'] = 'ampersandai'
+os.environ['KAGGLE_KEY'] = '86e251daba70b37e6e879a6ec7b37fb786e251daba70b37e6e879a6ec7b37fb7'
+
+def download_dataset(**kwargs):
+    api = KaggleApi()
+    api.authenticate()
+    api.dataset_download_files('jacksoncrow/stock-market-dataset', path='/tmp', unzip=True)
+
+    all_files = glob.glob('/tmp/*.csv')
+    kwargs['ti'].xcom_push(key='raw_data_files', value=all_files)
+
+def process_dataset(**kwargs):
+    all_files = kwargs['ti'].xcom_pull(key='raw_data_files')
+    data = pd.DataFrame(columns=['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
+    
+    for file in all_files:
+        symbol = os.path.splitext(os.path.basename(file))[0]
+        df = pd.read_csv(file, parse_dates=['Date'])
+        df['Symbol'] = symbol
+        df['Security Name'] = '' 
+        df = df[['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
+        
+        data = data.append(df, ignore_index=True)
+        
+    data.to_csv('/tmp/processed_data.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_path', value='/tmp/processed_data.csv')
+
+def feature_engineering(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+
+    processed_data.sort_values(['Symbol', 'Date'], inplace=True)
+    processed_data['vol_moving_avg'] = processed_data.groupby('Symbol')['Volume'].transform(lambda x: x.rolling(window=30).mean())
+    processed_data['adj_close_rolling_med'] = processed_data.groupby('Symbol')['Adj Close'].transform(lambda x: x.rolling(window=30).median())
+
+    processed_data.to_csv('/tmp/processed_data_fe.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_fe_path', value='/tmp/processed_data_fe.csv')
+
+def convert_fe_to_parquet(**kwargs):
+    processed_data_fe_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path')
+    processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+    
+    table = pa.Table.from_pandas(processed_data_fe)
+    pq.write_table(table, '/tmp/processed_data_fe.parquet')
+
+default_args = {
+    'owner':'airflow',
+    'depends_on_past': False, 
+    'email_on_failure': False,
+    'email_on_retry': False, 
+    'retries': 3, 
+    'retry_delay': timedelta(minutes=5),
+    'start_date': datetime(2023, 5, 19)
+}
+
+dag = DAG(
+    dag_id='stock_market_pipeline',
+    default_args=default_args, 
+    description= 'Stock Market Pipeline',
+    schedule_interval=timedelta(days=1),
+    catchup=False,
+)
+
+download_task = PythonOperator(
+   task_id='download_dataset',
+   python_callable
+
+
+
+
+User
+complete this please
+ChatGPT
+Apologies for the interruption. Here is the continuation and completion of the script:
+
+python
+Copy code
+    download_task = PythonOperator(
+       task_id='download_dataset',
+       python_callable=download_dataset,
+       provide_context=True,
+       dag=dag,
+    )
+
+    process_task = PythonOperator(
+        task_id='process_dataset',
+        python_callable=process_dataset,
+        provide_context=True,
+        dag=dag,
+    )
+
+    feature_engineering_task = PythonOperator(
+        task_id='feature_engineering',
+        python_callable=feature_engineering,
+        provide_context=True,
+        dag=dag,
+    )
+
+    convert_fe_task = PythonOperator(
+        task_id='convert_fe_to_parquet',
+        python_callable=convert_fe_to_parquet,
+        provide_context=True,
+        dag=dag,
+    )
+
+    # Set up the dependencies
+    download_task >> process_task >> feature_engineering_task >> convert_fe_task
+Now the DAG consists of four tasks: downloading the dataset, processing the dataset, adding new features to the dataset (feature engineering), and converting the dataset (with new features) to a Parquet file. The dependencies are set in such a way that each task depends on the successful execution of the preceding task.I have a task I am attempting to complete. Problem 2 is describes this task:
+Objective: Build some feature engineering on top of the dataset from Problem 1.
+
+Tasks:
+Calculate the moving average of the trading volume (Volume) of 30 days per each stock and ETF, and retain it in a newly added column vol_moving_avg.
+Similarly, calculate the rolling median and retain it in a newly added column adj_close_rolling_med.
+Retain the resulting dataset into the same format as Problem 1, but in its own stage/directory distinct from the first.
+(Bonus) Write unit tests for any relevant logic.Objective: Build some feature engineering on top of the dataset from Problem 1.
+
+Tasks:
+Calculate the moving average of the trading volume (Volume) of 30 days per each stock and ETF, and retain it in a newly added column vol_moving_avg.
+Similarly, calculate the rolling median and retain it in a newly added column adj_close_rolling_med.
+Retain the resulting dataset into the same format as Problem 1, but in its own stage/directory distinct from the first.
+(Bonus) Write unit tests for any relevant logic.
+
+And in the first problem, this was the DAG Script I created:
+from kaggle.api.kaggle_api_extended import KaggleApi
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime, timedelta
+import os
+import pandas as pd 
+import pyarrow as pa
+import pyarrow.parquet as pq
+import glob
+
+
+
+os.environ['KAGGLE_USERNAME'] = 'ampersandai'
+os.environ['KAGGLE_KEY'] = '86e251daba70b37e6e879a6ec7b37fb786e251daba70b37e6e879a6ec7b37fb7'
+
+def download_dataset(**kwargs):
+    api = KaggleApi()
+    api.authenticate()
+    api.dataset_download_files('jacksoncrow/stock-market-dataset', path='/tmp', unzip=True)
+
+    # Get the list of all files in the /tmp directory
+    all_files = glob.glob('/tmp/*.csv')
+
+    # Push the list of files to be accessed by the next task
+    kwargs['ti'].xcom_push(key='raw_data_files', value=all_files)
+
+def process_dataset(**kwargs):
+    all_files = kwargs['ti'].xcom_pull(key='raw_data_files')
+    data = pd.DataFrame(columns=['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
+    
+    for file in all_files:
+        symbol = os.path.splitext(os.path.basename(file))[0]
+        df = pd.read_csv(file, parse_dates=['Date'])
+        df['Symbol'] = symbol
+        df['Security Name'] = ''  # Add the security name here if available
+        df = df[['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
+        
+        data = data.append(df, ignore_index=True)
+        
+    data.to_csv('/tmp/processed_data.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_path', value='/tmp/processed_data.csv')
+
+def convert_to_parquet(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+    
+    table = pa.Table.from_pandas(processed_data)
+    pq.write_table(table, 'C:/Users/knet9/airflow_venv/processed_data.parquet')
+            
+default_args = {
+    'owner':'airflow',
+    'depends_on_past': False, 
+    'email_on_failure': False,
+    'email_on_retry': False, 
+    'retries': 3, 
+    'retry_delay':timedelta(minutes=5),
+    'start_date': datetime(2023, 5, 19)
+}
+
+dag = DAG(
+    dag_id='stock_market_pipeline',
+    default_args=default_args, 
+    description= 'Stock Market Pipeline',
+    schedule_interval=timedelta(days=1),
+    catchup=False,
+)
+
+download_task = PythonOperator(
+   task_id='download_dataset',
+   python_callable=download_dataset,
+   provide_context=True,
+   dag=dag,
+)
+
+process_task = PythonOperator(
+    task_id='process_dataset',
+    python_callable=process_dataset,
+    provide_context=True,
+    dag=dag,
+)
+
+convert_task = PythonOperator(
+    task_id='convert_to_parquet',
+    python_callable=convert_to_parquet,
+    provide_context=True,
+    dag=dag,
+)
+
+download_task >> process_task >> convert_task
+
+
+ChatGPT
+For problem 2, you can modify the process_dataset function to include moving average and rolling median calculations. You can use the rolling() function of pandas DataFrame to compute these. The moving average can be calculated using the mean() function, and the rolling median can be calculated using the median() function after calling rolling().
+
+Here is how you can modify your script:
+
+python
+Copy code
+def process_dataset_v2(**kwargs):
+    all_files = kwargs['ti'].xcom_pull(key='raw_data_files')
+    data = pd.DataFrame(columns=['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
+    
+    for file in all_files:
+        symbol = os.path.splitext(os.path.basename(file))[0]
+        df = pd.read_csv(file, parse_dates=['Date'])
+        df['Symbol'] = symbol
+        df['Security Name'] = ''  # Add the security name here if available
+        df = df[['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
+        
+        # Add the moving average and rolling median calculations
+        df['vol_moving_avg'] = df['Volume'].rolling(window=30).mean()
+        df['adj_close_rolling_med'] = df['Adj Close'].rolling(window=30).median()
+
+        data = data.append(df, ignore_index=True)
+        
+    data.to_csv('/tmp/processed_data_v2.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_path', value='/tmp/processed_data_v2.csv')
+
+process_task_v2 = PythonOperator(
+    task_id='process_dataset_v2',
+    task_id='process_dataset_v2',
+    python_callable=process_dataset_v2,
+    provide_context=True,
+    dag=dag,
+)
+
+# Change the dependency of the convert_task to process_task_v2
+download_task >> process_task_v2 >> convert_task
+This script will create a new CSV file processed_data_v2.csv, which contains two additional columns - 'vol_moving_avg' and 'adj_close_rolling_med'.
+
+For the bonus task of writing unit tests, here's a sample unit test for the moving average function:
+
+python
+Copy code
+import numpy as np
+
+def test_moving_average():
+    df = pd.DataFrame({
+        'Volume': np.random.randint(0, 100, size=(100,))
+    })
+    
+    df['vol_moving_avg'] = df['Volume'].rolling(window=30).mean()
+    
+    for i in range(30, 100):
+        assert df['vol_moving_avg'][i] == df['Volume'][i-30:i].mean(), f"Moving average calculation failed at index {i}"
+
+test_moving_average()
+This test creates a random DataFrame with the 'Volume' column, calculates the moving average, and then checks if the moving average at each point is equal to the mean of the previous 30 points. If the assertion fails at any point, it means that the moving average calculation is incorrect. Similar tests can be written for the rolling median calculation.
+
+
+
+
+
+User
+Shouldn't it be built on top like so:
+def feature_engineering(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+
+    # Ensure data is sorted by date for each stock
+    processed_data.sort_values(['Symbol', 'Date'], inplace=True)
+    
+    # Calculate moving average of trading volume over 30 days
+    processed_data['vol_moving_avg'] = processed_data.groupby('Symbol')['Volume'].transform(lambda x: x.rolling(window=30).mean())
+    
+    # Calculate rolling median of adjusted closing price
+    processed_data['adj_close_rolling_med'] = processed_data.groupby('Symbol')['Adj Close'].transform(lambda x: x.rolling(window=30).median())
+
+    # Save the processed data with new features as a CSV file in a new directory
+    processed_data.to_csv('/tmp/processed_data_fe.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_fe_path', value='/tmp/processed_data_fe.csv')
+
+def convert_fe_to_parquet(**kwargs):
+    processed_data_fe_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path')
+    processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+    
+    # Convert the DataFrame to a PyArrow Table and write it as a Parquet file
+    table = pa.Table.from_pandas(processed_data_fe)
+    pq.write_table(table, '/tmp/processed_data_fe.parquet')
+ChatGPT
+Yes, you are absolutely right, and I apologize for the oversight. In Problem 2, you are asked to build on top of the dataset from Problem 1. This means using the processed data and adding more features (moving average and rolling median) to it.
+
+Your approach of defining a new function, feature_engineering, to handle these calculations is completely valid.
+
+You correctly use groupby('Symbol') to calculate moving averages and rolling medians separately for each stock, and you also sort the data by date to ensure that the rolling calculations are accurate. This is important when dealing with time series data.
+
+Here is the updated DAG:
+
+python
+Copy code
+feature_engineering_task = PythonOperator(
+    task_id='feature_engineering',
+    python_callable=feature_engineering,
+    provide_context=True,
+    dag=dag,
+)
+
+convert_fe_task = PythonOperator(
+    task_id='convert_fe_to_parquet',
+    python_callable=convert_fe_to_parquet,
+    provide_context=True,
+    dag=dag,
+)
+
+# Create new dependencies
+download_task >> process_task >> feature_engineering_task >> convert_fe_task
+This will ensure that the DAG first downloads the data, processes it, adds new features to it, and then saves it as a Parquet file. The 'feature_engineering_task' and 'convert_fe_task' are chained after 'process_task' in the DAG.
+
+You may also want to keep your existing convert_to_parquet task if you wish to keep a version of the data without the new features. If that's the case, you would have two branches after the process_task, one leading to feature_engineering_task and another to convert_task.
+
+
+
+
+
+User
+can you write out the entire script accounting for this modification?
+ChatGPT
+Of course, here's your complete modified script with the new feature_engineering task and convert_fe_to_parquet task:
+
+python
+Copy code
+from kaggle.api.kaggle_api_extended import KaggleApi
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime, timedelta
+import os
+import pandas as pd 
+import pyarrow as pa
+import pyarrow.parquet as pq
+import glob
+
+os.environ['KAGGLE_USERNAME'] = 'ampersandai'
+os.environ['KAGGLE_KEY'] = '86e251daba70b37e6e879a6ec7b37fb786e251daba70b37e6e879a6ec7b37fb7'
+
+def download_dataset(**kwargs):
+    api = KaggleApi()
+    api.authenticate()
+    api.dataset_download_files('jacksoncrow/stock-market-dataset', path='/tmp', unzip=True)
+
+    all_files = glob.glob('/tmp/*.csv')
+    kwargs['ti'].xcom_push(key='raw_data_files', value=all_files)
+
+def process_dataset(**kwargs):
+    all_files = kwargs['ti'].xcom_pull(key='raw_data_files')
+    data = pd.DataFrame(columns=['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
+    
+    for file in all_files:
+        symbol = os.path.splitext(os.path.basename(file))[0]
+        df = pd.read_csv(file, parse_dates=['Date'])
+        df['Symbol'] = symbol
+        df['Security Name'] = '' 
+        df = df[['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
+        
+        data = data.append(df, ignore_index=True)
+        
+    data.to_csv('/tmp/processed_data.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_path', value='/tmp/processed_data.csv')
+
+def feature_engineering(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+
+    processed_data.sort_values(['Symbol', 'Date'], inplace=True)
+    processed_data['vol_moving_avg'] = processed_data.groupby('Symbol')['Volume'].transform(lambda x: x.rolling(window=30).mean())
+    processed_data['adj_close_rolling_med'] = processed_data.groupby('Symbol')['Adj Close'].transform(lambda x: x.rolling(window=30).median())
+
+    processed_data.to_csv('/tmp/processed_data_fe.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_fe_path', value='/tmp/processed_data_fe.csv')
+
+def convert_to_parquet(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+    
+    table = pa.Table.from_pandas(processed_data)
+    pq.write_table(table, '/tmp/processed_data.parquet')
+
+def convert_fe_to_parquet(**kwargs):
+    processed_data_fe_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path')
+    processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+    
+    table = pa.Table.from_pandas(processed_data_fe)
+    pq.write_table(table, '/tmp/processed_data_fe.parquet')
+
+default_args = {
+    'owner':'airflow',
+    'depends_on_past': False, 
+    'email_on_failure': False,
+    'email_on_retry': False, 
+    'retries': 3, 
+   
+
+
+
+
+User
+please continue
+ChatGPT
+Sure, I apologize for the cutoff. Continuing from where we left off:
+
+python
+Copy code
+    'retry_delay': timedelta(minutes=5),
+    'start_date': datetime(2023, 5, 19)
+}
+
+dag = DAG(
+    dag_id='stock_market_pipeline',
+    default_args=default_args, 
+    description= 'Stock Market Pipeline',
+    schedule_interval=timedelta(days=1),
+    catchup=False,
+)
+
+download_task = PythonOperator(
+   task_id='download_dataset',
+   python_callable=download_dataset,
+   provide_context=True,
+   dag=dag,
+)
+
+process_task = PythonOperator(
+    task_id='process_dataset',
+    python_callable=process_dataset,
+    provide_context=True,
+    dag=dag,
+)
+
+feature_engineering_task = PythonOperator(
+    task_id='feature_engineering',
+    python_callable=feature_engineering,
+    provide_context=True,
+    dag=dag,
+)
+
+convert_task = PythonOperator(
+    task_id='convert_to_parquet',
+    python_callable=convert_to_parquet,
+    provide_context=True,
+    dag=dag,
+)
+
+convert_fe_task = PythonOperator(
+    task_id='convert_fe_to_parquet',
+    python_callable=convert_fe_to_parquet,
+    provide_context=True,
+    dag=dag,
+)
+
+# Set up the dependencies
+download_task >> process_task >> feature_engineering_task >> convert_fe_task
+Now the DAG consists of five tasks: downloading the dataset, processing the dataset, adding new features to the dataset, converting the original processed dataset to parquet, and converting the dataset with new features to parquet. The convert_task and convert_fe_task are done separately. Please make sure to adjust your DAG and tasks according to your requirements.
+
+
+
+
+
+User
+Are you sure this is correct? What Unit tests could be included for relevant logic?
+ChatGPT
+In the DAG script, you're correct that the convert_to_parquet task isn't needed anymore since the original processed data isn't being converted to Parquet.
+
+The workflow should be: download the data, process it, perform feature engineering (where new features are added), and finally convert the data (with new features) to a Parquet file. The dependencies should reflect this: download_task >> process_task >> feature_engineering_task >> convert_fe_task.
+
+Regarding unit tests, they can be written for each of the Python functions you've defined to ensure they're working as expected.
+
+Here are some examples of unit tests for the process_dataset and feature_engineering functions:
+
+python
+Copy code
+import unittest
+import pandas as pd
+from unittest.mock import patch
+
+class TestPipeline(unittest.TestCase):
+    @patch('builtins.open', new_callable=mock_open, read_data='Symbol,Date,Open,High,Low,Close,Adj Close,Volume\nAAPL,2023-05-19,123.45,125.23,122.67,124.67,124.67,50000000\n')
+    def test_process_dataset(self):
+        kwargs = {'ti': MagicMock()}
+        kwargs['ti'].xcom_pull.return_value = ['AAPL.csv']
+
+        process_dataset(**kwargs)
+
+        processed_data_path = kwargs['ti'].xcom_push.call_args[0][1]
+        processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+        
+        self.assertEqual(processed_data.shape[0], 1)
+        self.assertEqual(processed_data['Symbol'].values[0], 'AAPL')
+
+    @patch('builtins.open', new_callable=mock_open, read_data='Symbol,Security Name,Date,Open,High,Low,Close,Adj Close,Volume\nAAPL,,2023-05-19,123.45,125.23,122.67,124.67,124.67,50000000\n')
+    def test_feature_engineering(self):
+        kwargs = {'ti': MagicMock()}
+        kwargs['ti'].xcom_pull.return_value = '/tmp/processed_data.csv'
+
+        feature_engineering(**kwargs)
+
+        processed_data_fe_path = kwargs['ti'].xcom_push.call_args[0][1]
+        processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+        
+        self.assertIn('vol_moving_avg', processed_data_fe.columns)
+        self.assertIn('adj_close_rolling_med', processed_data_fe.columns)
+        
+if __name__ == '__main__':
+    unittest.main()
+These are very simple unit tests and real tests should be more comprehensive, checking for more conditions and edge cases. Also, the process_dataset test uses the mock package to simulate the presence of a CSV file and the feature_engineering test assumes the existence of '/tmp/processed_data.csv'. In your actual tests, you may need to set up a real environment to have these files ready for testing.
+
+Remember that these tests are not exhaustive and they are meant to serve as starting points. It's generally a good idea to have as comprehensive test coverage as possible, but the exact tests you'll want to include will depend on the specifics of your data and use case.
+
+
+
+
+
+User
+
+2 / 2
+
+please may you write the entirety of the updated DAG scrpt so that I can run it in the Apache Airflow docker container?
+ChatGPT
+Absolutely, here's the entire updated script:
+
+python
+Copy code
+from kaggle.api.kaggle_api_extended import KaggleApi
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime, timedelta
+import os
+import pandas as pd 
+import pyarrow as pa
+import pyarrow.parquet as pq
+import glob
+
+os.environ['KAGGLE_USERNAME'] = 'ampersandai'
+os.environ['KAGGLE_KEY'] = '86e251daba70b37e6e879a6ec7b37fb786e251daba70b37e6e879a6ec7b37fb7'
+
+def download_dataset(**kwargs):
+    api = KaggleApi()
+    api.authenticate()
+    api.dataset_download_files('jacksoncrow/stock-market-dataset', path='/tmp', unzip=True)
+
+    all_files = glob.glob('/tmp/*.csv')
+    kwargs['ti'].xcom_push(key='raw_data_files', value=all_files)
+
+def process_dataset(**kwargs):
+    all_files = kwargs['ti'].xcom_pull(key='raw_data_files')
+    data = pd.DataFrame(columns=['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
+    
+    for file in all_files:
+        symbol = os.path.splitext(os.path.basename(file))[0]
+        df = pd.read_csv(file, parse_dates=['Date'])
+        df['Symbol'] = symbol
+        df['Security Name'] = '' 
+        df = df[['Symbol', 'Security Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
+        
+        data = data.append(df, ignore_index=True)
+        
+    data.to_csv('/tmp/processed_data.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_path', value='/tmp/processed_data.csv')
+
+def feature_engineering(**kwargs):
+    processed_data_path = kwargs['ti'].xcom_pull(key='processed_data_path')
+    processed_data = pd.read_csv(processed_data_path, parse_dates=['Date'])
+
+    processed_data.sort_values(['Symbol', 'Date'], inplace=True)
+    processed_data['vol_moving_avg'] = processed_data.groupby('Symbol')['Volume'].transform(lambda x: x.rolling(window=30).mean())
+    processed_data['adj_close_rolling_med'] = processed_data.groupby('Symbol')['Adj Close'].transform(lambda x: x.rolling(window=30).median())
+
+    processed_data.to_csv('/tmp/processed_data_fe.csv', index=False)
+    kwargs['ti'].xcom_push(key='processed_data_fe_path', value='/tmp/processed_data_fe.csv')
+
+def convert_fe_to_parquet(**kwargs):
+    processed_data_fe_path = kwargs['ti'].xcom_pull(key='processed_data_fe_path')
+    processed_data_fe = pd.read_csv(processed_data_fe_path, parse_dates=['Date'])
+    
+    table = pa.Table.from_pandas(processed_data_fe)
+    pq.write_table(table, '/tmp/processed_data_fe.parquet')
+
+default_args = {
+    'owner':'airflow',
+    'depends_on_past': False, 
+    'email_on_failure': False,
+    'email_on_retry': False, 
+    'retries': 3, 
+    'retry_delay': timedelta(minutes=5),
+    'start_date': datetime(2023, 5, 19)
+}
+
+dag = DAG(
+    dag_id='stock_market_pipeline',
+    default_args=default_args, 
+    description= 'Stock Market Pipeline',
+    schedule_interval=timedelta(days=1),
+    catchup=False,
+)
+
+download_task = PythonOperator(
+   task_id='download_dataset',
+   python_callable
+
+
+
+
+User
+complete this please
+ChatGPT
+Apologies for the interruption. Here is the continuation and completion of the script:
+
+python
+Copy code
+    download_task = PythonOperator(
+       task_id='download_dataset',
+       python_callable=download_dataset,
+       provide_context=True,
+       dag=dag,
+    )
+
+    process_task = PythonOperator(
+        task_id='process_dataset',
+        python_callable=process_dataset,
+        provide_context=True,
+        dag=dag,
+    )
+
+    feature_engineering_task = PythonOperator(
+        task_id='feature_engineering',
+        python_callable=feature_engineering,
+        provide_context=True,
+        dag=dag,
+    )
+
+    convert_fe_task = PythonOperator(
+        task_id='convert_fe_to_parquet',
+        python_callable=convert_fe_to_parquet,
+        provide_context=True,
+        dag=dag,
+    )
+
+    # Set up the dependencies
+    download_task >> process_task >> feature_engineering_task >> convert_fe_task
+Now the DAG consists of four tasks: downloading the dataset, processing the dataset, adding new features to the dataset (feature engineering), and converting the dataset (with new features) to a Parquet file. The dependencies are set in such a way that each task depends on the successful execution of the preceding task.
