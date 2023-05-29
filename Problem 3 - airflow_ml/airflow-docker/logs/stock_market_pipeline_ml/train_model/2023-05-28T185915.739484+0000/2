@@ -1,0 +1,49 @@
+[2023-05-29 19:05:04,608] {taskinstance.py:896} INFO - Dependencies all met for <TaskInstance: stock_market_pipeline_ml.train_model 2023-05-28T18:59:15.739484+00:00 [queued]>
+[2023-05-29 19:05:05,200] {taskinstance.py:896} INFO - Dependencies all met for <TaskInstance: stock_market_pipeline_ml.train_model 2023-05-28T18:59:15.739484+00:00 [queued]>
+[2023-05-29 19:05:05,200] {taskinstance.py:1087} INFO - 
+--------------------------------------------------------------------------------
+[2023-05-29 19:05:05,201] {taskinstance.py:1088} INFO - Starting attempt 2 of 4
+[2023-05-29 19:05:05,201] {taskinstance.py:1089} INFO - 
+--------------------------------------------------------------------------------
+[2023-05-29 19:05:05,658] {taskinstance.py:1107} INFO - Executing <Task(PythonOperator): train_model> on 2023-05-28T18:59:15.739484+00:00
+[2023-05-29 19:05:05,663] {standard_task_runner.py:52} INFO - Started process 6823 to run task
+[2023-05-29 19:05:05,666] {standard_task_runner.py:76} INFO - Running: ['***', 'tasks', 'run', 'stock_market_pipeline_ml', 'train_model', '2023-05-28T18:59:15.739484+00:00', '--job-id', '16', '--pool', 'default_pool', '--raw', '--subdir', 'DAGS_FOLDER/stock_market_pipeline_ml.py', '--cfg-path', '/tmp/tmpt0rr90md', '--error-file', '/tmp/tmpc9yrszsx']
+[2023-05-29 19:05:05,668] {standard_task_runner.py:77} INFO - Job 16: Subtask train_model
+[2023-05-29 19:05:06,065] {logging_mixin.py:104} INFO - Running <TaskInstance: stock_market_pipeline_ml.train_model 2023-05-28T18:59:15.739484+00:00 [running]> on host 034390c2fbf7
+[2023-05-29 19:05:06,329] {taskinstance.py:1302} INFO - Exporting the following env vars:
+AIRFLOW_CTX_DAG_OWNER=***
+AIRFLOW_CTX_DAG_ID=stock_market_pipeline_ml
+AIRFLOW_CTX_TASK_ID=train_model
+AIRFLOW_CTX_EXECUTION_DATE=2023-05-28T18:59:15.739484+00:00
+AIRFLOW_CTX_DAG_RUN_ID=scheduled__2023-05-28T18:59:15.739484+00:00
+[2023-05-29 19:05:06,342] {taskinstance.py:1501} ERROR - Task failed with exception
+Traceback (most recent call last):
+  File "/home/airflow/.local/lib/python3.6/site-packages/airflow/models/taskinstance.py", line 1157, in _run_raw_task
+    self._prepare_and_execute_task_with_callbacks(context, task)
+  File "/home/airflow/.local/lib/python3.6/site-packages/airflow/models/taskinstance.py", line 1331, in _prepare_and_execute_task_with_callbacks
+    result = self._execute_task(context, task_copy)
+  File "/home/airflow/.local/lib/python3.6/site-packages/airflow/models/taskinstance.py", line 1361, in _execute_task
+    result = task_copy.execute(context=context)
+  File "/home/airflow/.local/lib/python3.6/site-packages/airflow/operators/python.py", line 150, in execute
+    return_value = self.execute_callable()
+  File "/home/airflow/.local/lib/python3.6/site-packages/airflow/operators/python.py", line 161, in execute_callable
+    return self.python_callable(*self.op_args, **self.op_kwargs)
+  File "/opt/airflow/dags/stock_market_pipeline_ml.py", line 162, in train_model
+    processed_data_scaled, scaler = preprocess_data(processed_data_fe)
+  File "/opt/airflow/dags/stock_market_pipeline_ml.py", line 119, in preprocess_data
+    df_scaled = pd.DataFrame(scaler.fit_transform(df), columns=df.columns, index=df.index)
+  File "/home/airflow/.local/lib/python3.6/site-packages/sklearn/base.py", line 699, in fit_transform
+    return self.fit(X, **fit_params).transform(X)
+  File "/home/airflow/.local/lib/python3.6/site-packages/sklearn/preprocessing/_data.py", line 363, in fit
+    return self.partial_fit(X, y)
+  File "/home/airflow/.local/lib/python3.6/site-packages/sklearn/preprocessing/_data.py", line 398, in partial_fit
+    force_all_finite="allow-nan")
+  File "/home/airflow/.local/lib/python3.6/site-packages/sklearn/base.py", line 421, in _validate_data
+    X = check_array(X, **check_params)
+  File "/home/airflow/.local/lib/python3.6/site-packages/sklearn/utils/validation.py", line 63, in inner_f
+    return f(*args, **kwargs)
+  File "/home/airflow/.local/lib/python3.6/site-packages/sklearn/utils/validation.py", line 729, in check_array
+    context))
+ValueError: Found array with 0 sample(s) (shape=(0, 10)) while a minimum of 1 is required by MinMaxScaler.
+[2023-05-29 19:05:06,397] {taskinstance.py:1551} INFO - Marking task as UP_FOR_RETRY. dag_id=stock_market_pipeline_ml, task_id=train_model, execution_date=20230528T185915, start_date=20230529T190504, end_date=20230529T190506
+[2023-05-29 19:05:06,439] {local_task_job.py:149} INFO - Task exited with return code 1
